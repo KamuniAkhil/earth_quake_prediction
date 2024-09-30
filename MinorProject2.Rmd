@@ -1,0 +1,809 @@
+---
+title: "MinorProject2"
+output:
+  html_document:
+    df_print: paged
+date: "2024-05-22"
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##MINOR PROJECT
+
+##160121771105 - Akhil Kamuni
+
+##160121771113 - N. Sai Pranav Reddy
+
+##160121771118 - Parimi Anudheer
+
+##160121771133 - Ved Krishna Padakanti
+
+##Earthquake Data Time-Series Analysis
+
+##Let's get started
+
+Define the path to the directory containing the CSV files.
+
+List all files in the directory with a pattern "raw.csv" and get their
+full paths.
+
+Read all CSV files and combine them into a single data frame.
+
+Remove row names from the combined data frame.
+
+Print the dimensions of the combined dataframe.
+
+```{r pressure, echo=FALSE}
+library(data.table)
+path <- "C:\\Users\\Akhil_kamuni\\OneDrive\\Desktop\\MP_2\\MP_2\\datasets\\imported_usgs_api"
+my_files <- list.files(path, pattern = "raw.csv", full.names = TRUE)
+df_combined <- rbindlist(lapply(my_files, fread))
+rownames(df_combined) <- NULL
+dim(df_combined)
+```
+
+Define a function to clean the data frame
+
+Apply the cleaning function to the combined data frame
+
+Impute missing depth values with the mean depth
+
+Convert the time column from string to POSIXct datetime format
+
+Ensure the data frame is arranged by the time column
+
+Impute missing depth values with the mean depth
+
+```{r}
+clean_df <- function(df) {
+  # Select only the useful columns from the data frame
+  df_clean <- df[, c('type', 'time', 'coordinates', 'mag', 'place', 'status', 'tsunami', 'sig', 'net', 
+                     'nst', 'dmin', 'rms', 'gap', 'magType'), drop = FALSE]
+  
+  # Remove square brackets from the coordinates column
+  df_clean$coordinates <- gsub("\\[|\\]", "", df_clean$coordinates)
+  
+  # Split the coordinates into separate longitude, latitude, and depth columns
+  coordinates_split <- strsplit(df_clean$coordinates, ",")
+  
+  # Convert the list of character vectors to a matrix of numeric values
+  coordinates_matrix <- do.call(rbind, lapply(coordinates_split, as.numeric))
+  
+  # Ensure the matrix has the correct dimensions (3 columns for longitude, latitude, depth)
+  if (ncol(coordinates_matrix) == 3) {
+    df_clean$longitude <- coordinates_matrix[, 1]
+    df_clean$latitude <- coordinates_matrix[, 2]
+    df_clean$depth <- coordinates_matrix[, 3]
+  } else {
+    stop("Unexpected number of dimensions in the coordinates column.")
+  }
+  
+  # Convert the time column from milliseconds since epoch to POSIXct datetime format
+  df_clean$time <- as.POSIXct(as.numeric(df_clean$time) / 1000, origin = "1970-01-01")
+  
+  # Drop the original coordinates column as it is no longer needed
+  df_clean$coordinates <- NULL
+  
+  return(df_clean)
+}
+
+df_combined_clean <- clean_df(df_combined)
+
+df_combined_clean$depth[is.na(df_combined_clean$depth)] <- mean(df_combined_clean$depth, na.rm = TRUE)
+
+df_eq <- df_combined_clean
+
+df_eq$time <- as.POSIXct(df_eq$time, format = "%Y-%m-%d %H:%M:%OS")
+df_eq <- df_eq[order(df_eq$time), ]
+df_eq$depth[is.na(df_eq$depth)] <- mean(df_eq$depth, na.rm = TRUE)
+```
+
+##Now Lets plot a few graphs for data visualization
+
+Set plot dimensions
+
+Histogram for earthquake magnitude vs. frequency
+
+Barplot for earthquake depth vs. frequency
+
+Histogram for earthquake depth
+
+Histogram depicting the longitudes at which earthquakes occur
+
+Similarly for latitude
+
+```{r}
+hist(df_eq$mag, breaks=30, main="", xlab="EQ Magnitude", ylab="Frequency", col="skyblue")
+barplot(df_eq$depth, main="", xlab="Records", ylab="EQ Depth", col="skyblue")
+hist(df_eq$depth, breaks=30, main="", xlab="EQ Depth", ylab="Frequency", col="skyblue")
+hist(df_eq$longitude, breaks=30, main="", xlab="EQ Longitude", ylab="Frequency", col="skyblue")
+hist(df_eq$latitude, breaks=30, main="", xlab="EQ Latitude", ylab="Frequency", col="skyblue")
+```
+
+Now lets get into Exploratory Data Analysis
+
+Perform a Pearson correlation test between magnitude and significance
+
+Plot original magnitudes and significance
+
+Filter rows where magnitude is greater than 6 to find number of big
+earthquakes
+
+Plot the magnitudes of the large earthquakes
+
+Draw the map of California
+
+Scatter plot of large earthquakes on the map
+
+Filter earthquakes 30 days prior to the biggest earthquak
+
+Scatter plot of earthquakes in the filtered period on the map
+
+```{r}
+library(ggplot2)
+library(maps)
+library(mapdata)
+library(dplyr)
+
+cor.test(df_eq$mag, df_eq$sig, method = "pearson")
+
+ggplot(data = df_eq, aes(x = mag)) +
+  geom_point(aes(y = sig), color = "red") +
+  labs(x = "Magnitude", y = "Significance", title = "Significance Vs Magnitude")
+
+df_eq_large <- subset(df_eq, mag > 6)
+nrow(df_eq_large)
+ggplot(df_eq_large, aes(x = seq_along(mag), y = mag)) +
+  geom_point(color = "red") +
+  geom_line() +
+  labs(title = "Magnitude of Large Earthquakes", x = "Index", y = "Magnitude") +
+  theme_minimal()
+
+plot(x = df_eq_large$longitude, y = df_eq_large$latitude, xlim = c(-130, -110), ylim = c(32, 43), type = "n")
+map("state", regions="california", col="lightblue", fill=TRUE, xlim=c(-130, -110), ylim=c(32, 43))
+points(df_eq_large$longitude, df_eq_large$latitude, col = "red", pch = 16, cex = df_eq_large$mag * 0.15)
+legend("bottomleft", legend = "Magnitude", pch = 19, pt.cex = 2, cex = 0.8, col = "red", title = "Magnitude")
+
+df_copy <- df_combined_clean
+df_copy$time <- as.Date(df_copy$time)
+df_eq_lp <- df_copy %>%
+  filter(time >= as.Date('1989-09-19') & time <= as.Date('1989-10-19'))
+nrow(df_eq_lp)
+
+plot(x = df_eq_lp$longitude, y = df_eq_lp$latitude, xlim = c(-130, -110), ylim = c(32, 43), type = "n")
+map("state", col="lightblue", fill=TRUE, xlim=c(-130, -110), ylim=c(32, 43))
+points(df_eq_lp$longitude, df_eq_lp$latitude, col = "red", pch = 16, cex = df_eq_lp$mag * 0.15)
+legend("bottomleft", legend = "Magnitude", pch = 19, pt.cex = 2, cex = 0.8, col = "red", title = "Magnitude")
+```
+
+##Linear Regression
+
+Add a time column in seconds
+
+Identify the failure event with the maximum magnitude
+
+Calculate the time to failure in seconds for each event
+
+Plot earthquake distribution by longitude and latitude with size
+representing magnitude
+
+Select predictor variables (magnitude, depth, longitude, latitude) and
+response variable (significance)
+
+Make Predictions, plot and calculate residuals
+
+```{r}
+library(ggplot2)
+library(corrplot)
+library(Metrics)
+
+df_eq$time_seconds <- as.numeric(df_eq$time)
+
+
+failure_event <- df_eq[df_eq$mag == max(df_eq$mag), ]
+
+
+df_eq$time_to_failure_sec <- as.numeric(failure_event$time_seconds) - df_eq$time_seconds
+
+
+head(df_eq, 5)
+print(failure_event)
+
+
+ggplot(df_eq_large, aes(x = longitude, y = latitude, size = mag)) +
+  geom_point(alpha = 0.4) +
+  scale_size_continuous(range = c(1, 10)) +
+  labs(title = "Earthquake Distribution", x = "Longitude", y = "Latitude", size = "Magnitude") +
+  theme_minimal()
+
+
+X <- df_eq[, c("mag", "depth", "longitude", "latitude")]
+y <- df_eq$sig
+
+model <- lm(y ~ ., data = X)
+
+y_pred <- predict(model, newdata = X)
+
+plot(y_pred, y, main = "Predicted vs Actual Significance", xlab = "Predicted Significance", ylab = "Actual Significance")
+abline(lm(y ~ y_pred), col = "red")
+
+resids <- abs(y - y_pred)
+
+max_residual <- max(resids)
+mean_residual <- mean(resids)
+print(max_residual)
+print(mean_residual)
+
+```
+
+##DBSCAN Clustering
+
+Standardize the data and apply DBSCAN clustering to identify clusters of
+earthquake events. Visualize the clusters on a scatter plot. Highlight
+the most significant cluster on an interactive map. Knee Point
+Detection:
+
+Use K-Nearest Neighbors to plot an elbow curve and identify the optimal
+eps parameter for DBSCAN using knee point detection.
+
+```{r}
+# Load required libraries
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(ggplot2)
+library(leaflet)
+library(geosphere)
+library(maps)
+library(mapproj)
+library(caret)
+library(cluster)
+library(datasets)
+library(dbscan)
+library(Rtsne)
+library(randomForest)
+library(IRdisplay)
+library(repr)
+library(xts)
+
+# Set plot size
+options(repr.plot.width = 6, repr.plot.height = 4)
+
+# Define file path and read CSV file into a data frame
+file_path <- "C:\\Users\\Akhil_kamuni\\OneDrive\\Desktop\\MP_2\\MP_2\\datasets\\combined_eq_california_timeseries.csv"
+df_eq <- read.csv(file_path)
+
+# Convert the time column to POSIXct format
+df_eq$time <- as.POSIXct(df_eq$time, format = "%Y-%m-%d %H:%M:%S")
+
+# Show the first 3 rows of the data frame
+head(df_eq, 3)
+
+# Filter the DataFrame for significant earthquakes (magnitude > 6)
+df_eq_large <- subset(df_eq, mag > 6)
+df_eq_large$time <- as.POSIXct(df_eq_large$time, format = "%Y-%m-%d %H:%M:%S")
+
+# Calculate time differences in days
+df_eq_large$time_diff_day <- c(NA, diff(df_eq_large$time)) / (24 * 60 * 60)
+head(df_eq_large, 2)
+
+# Select rows within the specified date range
+start_date <- as.Date("1989-09-19")
+end_date <- as.Date("1989-10-19")
+df_eq_sel_range <- subset(df_eq, time >= start_date & time <= end_date)
+head(df_eq_sel_range, 2)
+
+# Plot selected earthquakes on a leaflet map
+map <- leaflet() %>%
+  addTiles() %>%
+  setView(lng = -120, lat = 38, zoom = 5) %>%
+  addCircleMarkers(data = df_eq_sel_range,
+                   lng = ~longitude,
+                   lat = ~latitude,
+                   radius = ~mag/5,
+                   color = "red",
+                   opacity = 0.5)
+map
+
+# Create a line plot of longitude over time
+ggplot(data = df_eq_sel_range, aes(x = time, y = longitude)) +
+  geom_line(color = "red") +
+  geom_point(color = "red") +
+  labs(title = "Longitude", x = "Time", y = "Longitude") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Prepare data for clustering
+df <- df_eq_sel_range[, c("longitude", "latitude", "depth")]
+ss <- scale(df)
+
+# Perform DBSCAN clustering
+eps_param <- 0.33
+min_sample <- 7
+dbscan <- dbscan::dbscan(ss, eps = eps_param, minPts = min_sample)
+df$cluster <- dbscan$cluster
+core_samples_mask <- dbscan$borderPoints
+
+# Print cluster information
+cat("Total number of points:", nrow(df), "\n")
+cat("Estimated number of clusters:", length(unique(dbscan$cluster)) - (1 %in% dbscan$cluster), "\n")
+cat("Estimated number of noise points:", sum(dbscan$cluster == 0), "\n")
+
+# Print cluster counts
+print(table(df$cluster))
+
+# Plot the clusters
+df_filtered <- df[df$cluster != -1, ]
+plot <- ggplot(df_filtered, aes(x = longitude, y = latitude, color = factor(cluster))) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("gray", "blue", "green", "red", "orange","pink","black")) +
+  labs(title = "Clusters", x = "Longitude", y = "Latitude") +
+  theme_minimal()
+print(plot)
+
+# Plot clusters on a leaflet map
+palette <- colorFactor(palette = "viridis", domain = df$cluster)
+map <- leaflet() %>%
+  addTiles() %>%
+  setView(lng = -120, lat = 38, zoom = 5) %>%
+  addCircleMarkers(data = df,
+                   lng = ~longitude,
+                   lat = ~latitude,
+                   radius = 5,
+                   color = ~palette(cluster),
+                   opacity = 0.5)
+print(map)
+
+# Knee point detection using K-Nearest Neighbors
+library(FNN)
+nn <- get.knn(ss, k = min_sample)
+distances <- nn$nn.dist[, min_sample]
+sorted_distances <- sort(distances)
+
+# Identify the knee point
+library(inflection)
+knee_point <- findiplist(1:length(sorted_distances), sorted_distances, 1)
+knee_point_value <- knee_point[[2]]
+
+# Plot knee point detection
+ggplot(data = data.frame(i = 1:length(sorted_distances), distances = sorted_distances), aes(x = i, y = distances)) +
+  geom_line() +
+  geom_vline(xintercept = knee_point_value, linetype = "dashed", color = "red") +
+  labs(x = "Points", y = "Distance", title = "Knee Point Detection") +
+  theme_minimal()
+print(sorted_distances[knee_point_value])
+
+```
+
+##Vector Auto Regressive Model for predicting different values such as
+##magnitude, significance, etc.
+
+Data Aggregation and Summary Statistics:
+
+Aggregate data by day. Compute summary statistics like maximum
+magnitude, event count, mean magnitude, etc. Calculate rolling means for
+certain columns.
+
+Data Visualization: Visualize missing values using a heatmap. Plot
+histograms for each column. Create a correlation matrix plot.
+
+Time Series Analysis: Perform Dickey-Fuller test for stationarity. Split
+the data into train and test sets. Fit a VAR (Vector Autoregression)
+model.
+
+Forecasting: Generate forecasts using the VAR model. Evaluate forecast
+accuracy using Mean Squared Error (MSE). Visualize actual vs. predicted
+values.
+
+```{r}
+# Load required libraries
+library("data.table")
+library("stats")
+library("forecast")
+library("dplyr")
+library("vars")
+
+file_path <- "C:\\Users\\Akhil_kamuni\\OneDrive\\Desktop\\MP_2\\MP_2\\datasets\\combined_eq_california_timeseries.csv"
+df_eq <- read.csv(file_path)
+
+df_eq <- df_eq[, c("time", "mag", "sig", "longitude", "latitude", "depth")]
+
+df_eq$time <- as.POSIXct(df_eq$time)
+df_eq$timestamps <- df_eq$time
+
+head(df_eq)
+
+str(df_eq)
+
+duplicated_rows <- df_eq[duplicated(df_eq$timestamps), ]
+df_eq <- df_eq[!duplicated(df_eq$timestamps), ]
+
+# Calculating difference between consecutive timestamps
+timestamps_diff <- diff(df_eq$timestamps)
+summary(timestamps_diff)
+str(df_eq)
+library(zoo)
+
+# Number 1: Time intervals between consecutive earthquakes
+df_eq$time_diff <- c(NA, diff(df_eq$timestamps))
+df_eq$time_diff_float <- as.numeric(df_eq$time_diff, units = "secs")
+
+# Number 2: Rolling mean of magnitudes from the last 10 earthquakes
+df_eq$mag_roll_10 <- rollapplyr(df_eq$mag, width = 10, FUN = mean, fill = NA, 
+                                align = "right")
+
+# Drop rows with NA values
+df_eq <- na.omit(df_eq)
+summary(df_eq)
+
+filtered_rows <- df_eq[df_eq$time_diff_float > 86400, ]
+
+num_filtered_rows <- nrow(filtered_rows)
+
+print(num_filtered_rows)
+
+# Filter rows based on the condition time_diff_float > 86400 (which means time difference greater than 86400 seconds)
+filtered_rows <- subset(df_eq, time_diff_float > 86400)
+
+print(filtered_rows)
+
+min_date <- min(df_eq$time)
+min_date <- as.Date(min_date)
+print(min_date)
+
+max_date <- max(df_eq$time)
+max_date <- as.Date(max_date)
+print(max_date)
+
+max_date <- max(df_eq$time)
+max_date <- as.Date(max_date)
+print(typeof(max_date))
+
+
+start_date <- min(df_eq$time)
+
+# Calculate the number of days between min_date and max_date
+number_of_days <- as.integer(difftime(max(df_eq$time), min(df_eq$time), units = "days"))
+print(paste("number_of_days:", number_of_days))
+
+date_list <- seq(start_date, by = "days", length.out = number_of_days)
+
+print(date_list[2])
+print(class(date_list[2]))
+start_date <- min(df_eq$time)
+
+number_of_days <- as.integer(difftime(max(df_eq$time), min(df_eq$time), units = "days"))
+print(paste("number_of_days:", number_of_days))
+
+date_list <- seq(start_date, by = "days", length.out = number_of_days)
+
+print(date_list[2])
+print(class(date_list[2]))
+df_eq
+
+setDT(df_eq)
+setkey(df_eq, time)
+
+
+rownames(df_eq) <- df_eq$time
+
+setkey(df_eq, time)
+
+library(zoo)
+
+# Aggregate data by day
+df_eq[, date := as.IDate(time)]
+df_daily <- df_eq[, .(
+  mag_max = max(mag, na.rm = TRUE),
+  event_count = .N,
+  mag_mean = mean(mag, na.rm = TRUE),
+  mag_sum = sum(mag, na.rm = TRUE),
+  mag_scatter = sd(mag, na.rm = TRUE),
+  longitude_mean = mean(longitude, na.rm = TRUE),
+  longitude_std = sd(longitude, na.rm = TRUE),
+  latitude_mean = mean(latitude, na.rm = TRUE),
+  latitude_std = sd(latitude, na.rm = TRUE),
+  depth_mean = mean(depth, na.rm = TRUE),
+  depth_std = sd(depth, na.rm = TRUE),
+  time_diff_float_mean = mean(time_diff_float, na.rm = TRUE),
+  time_diff_float_std = sd(time_diff_float, na.rm = TRUE)
+), by = date]
+
+# Calculate the rolling mean for the mag_mean column with a window of 10 days
+df_daily[, mag_roll_10 := rollapply(mag_mean, width = 10, FUN = mean, fill = NA, align = "right")]
+
+df_daily
+
+
+library(data.table)
+library(ggplot2)
+library(naniar)
+df_daily <- as.data.frame(df_daily)
+ggplot_missing <- vis_miss(df_daily) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = "Heatmap of Missing Values")
+print(ggplot_missing)
+
+ggsave("heatmap_missing_values.png", plot = ggplot_missing, width = 8, height = 5)
+
+
+setDT(df_daily)
+
+df_daily_clean <- df_daily[date > as.IDate("1972-01-01")]
+
+df_daily_clean[, mag_roll_10 := NULL]
+
+print(df_daily_clean)
+
+df_daily_clean <- as.data.frame(df_daily_clean)
+
+ggplot_missing <- vis_miss(df_daily_clean) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = "Heatmap of Missing Values")
+print(ggplot_missing)
+
+ggsave("heatmap_missing_values.png", plot = ggplot_missing, width = 8, height = 5)
+
+library(data.table)
+
+setDT(df_daily_clean)
+
+str(df_daily_clean)
+
+summary(df_daily_clean)
+
+
+library(data.table)
+library(zoo)
+
+df_daily_clean <- as.data.frame(df_daily_clean)
+
+df_daily_clean$date <- as.POSIXct(df_daily_clean$date)
+
+df_daily_clean <- df_daily_clean[order(df_daily_clean$date), ]
+
+columns_to_interpolate <- c("mag_max", "event_count", "mag_mean", "mag_sum", "mag_scatter", 
+                            "longitude_mean", "longitude_std", "latitude_mean", 
+                            "latitude_std", "depth_mean", "depth_std", 
+                            "time_diff_float_mean", "time_diff_float_std")
+
+# Perform linear interpolation on specified columns
+for (col in columns_to_interpolate) {
+  df_daily_clean[[col]] <- na.approx(df_daily_clean[[col]], rule = 2)  # rule = 2 handles leading/trailing NAs
+}
+
+df_daily_clean$date <- as.Date(df_daily_clean$date)
+
+setDT(df_daily_clean)
+
+if (any(is.na(df_daily_clean))) {
+  print("Warning: There are still NA values in df_daily_clean after interpolation.")
+}
+
+print(df_daily_clean)
+
+df_daily_clean <- df_daily_clean[complete.cases(df_daily_clean), ]
+
+print(df_daily_clean)
+
+df_daily_clean <- as.data.frame(df_daily_clean)
+
+
+str(df_daily_clean)
+
+df_eq <- df_daily_clean
+df_eq_shape <- dim(df_eq)
+
+print(df_eq_shape)
+
+str(df_eq)
+
+label <- vector("integer", length = nrow(df_eq))
+cnt <- 0
+
+# Loop through each row and assign labels based on magnitude
+for (i in 1:nrow(df_eq)) {
+  if (df_eq$mag_max[i] > 5.5) {
+    cnt <- cnt + 1
+    label[i] <- as.integer(cnt)
+  } else {
+    label[i] <- 0
+  }
+}
+
+df_eq$large_eq_label <- label
+
+print(df_eq)
+
+df_eq <- as.data.frame(df_eq)
+
+summary_stats <- summary(df_eq)
+
+summary_stats_transposed <- t(summary_stats)
+print(summary_stats_transposed)
+
+str(df_eq)
+
+library(ggplot2)
+library(gridExtra)
+
+df_eq <- as.data.frame(df_eq)
+
+plots <- lapply(names(df_eq), function(col) {
+  ggplot(df_eq, aes_string(x = col)) +
+    geom_histogram() + 
+    labs(title = col) 
+})
+
+# Arrange plots in a grid layout
+grid.arrange(grobs = plots, ncol = 3)  # Example: Arrange in 3 columns
+
+str(df_eq)
+
+
+library(corrplot)
+df_numeric <- df_eq[, !names(df_eq) %in% "date"]
+# Calculate the correlation matrix
+df_corr <- cor(df_numeric)
+print(df_corr)
+corrplot(df_corr, method = "color", type = "upper", 
+         col = colorRampPalette(c("blue", "white", "red"))(100),
+         tl.col = "black", tl.srt = 45, diag = FALSE)
+
+df_eq <- df_daily_clean
+
+print(head(df_eq, 2))
+
+
+interpret_dftest <- function(dftest) {
+  dfoutput <- list(
+    "Test Statistic" = dftest$statistic,
+    "p-value" = dftest$p.value,
+    "Lag Used" = dftest$parameter
+  )
+  
+  return(dfoutput)
+}
+library(tseries)
+# Perform Dickey-Fuller test
+dftest <- adf.test(df_eq$mag_max)
+result <- interpret_dftest(dftest)
+print(result)
+
+
+test_size <- 0.25
+num_test_rows <- round(nrow(df_eq) * test_size)
+
+test_indices <- sample(seq_len(nrow(df_eq)), size = num_test_rows, replace = FALSE)
+
+# Create the test set using the sampled indices
+test <- df_eq[test_indices, ]
+
+# Create the train set by excluding the rows in the test set
+train <- df_eq[-test_indices, ]
+
+# Load the vars package
+library(vars)
+train_ts <- ts(train, frequency = 1)
+# Instantiate a VAR model
+model <- VAR(train_ts)
+# Fit a VAR model with specified parameters
+ts_model <- VAR(train_ts, p = 60, type = "const", ic = "aic")
+ts_model.k_ar <- ts_model$p
+print(ts_model.k_ar)
+forecast_steps <- 3
+forecast <- predict(ts_model, n.ahead = forecast_steps)
+print(forecast)
+
+#pdf("forecast_plot.pdf", width = 10, height = 6)
+#plot(forecast)
+#dev.off()
+
+library(forecast)
+forecast_horizon <- nrow(test)
+forecast_result <- predict(ts_model, n.ahead = forecast_horizon)
+
+forecast_values <- forecast_result$fcst
+
+forecast_df <- data.frame(lapply(forecast_values, function(x) x[, "fcst"]))
+
+names(forecast_df) <- names(test)
+
+numeric_columns <- sapply(test, is.numeric)
+
+test_numeric <- test[, numeric_columns]
+forecast_numeric <- forecast_df[, numeric_columns]
+
+names(forecast_numeric) <- names(test_numeric)
+
+numeric_columns <- sapply(test, is.numeric)
+test_numeric <- test[, numeric_columns]
+forecast_numeric <- forecast_df[, numeric_columns]
+
+names(forecast_numeric) <- names(test_numeric)
+
+# Calculate and print MSE for each numeric column in the test data
+for (i in seq_along(test_numeric)) {
+  mse_value <- mean((test_numeric[[i]] - forecast_numeric[[i]])^2, na.rm = TRUE)
+  cat(sprintf("The test MSE on the %s data is: %.4f\n", names(test_numeric)[i], mse_value))
+}
+
+
+library(ggplot2)
+plot_data <- data.frame(
+  Index = 1:length(test_numeric[, 1]),  
+  True = test_numeric[, 1], 
+  Predicted = forecast_numeric[, 1] 
+)
+ggplot(plot_data, aes(x = Index)) +
+  geom_line(aes(y = True, color = "True"), size = 1) +
+  geom_point(aes(y = True, color = "True"), size = 1, shape = 19) +
+  geom_line(aes(y = Predicted, color = "Predicted"), size = 1, linetype = "dashed") +
+  geom_point(aes(y = Predicted, color = "Predicted"), size = 1, shape = 19) +
+  scale_color_manual(values = c(True = "blue", Predicted = "red")) +
+  labs(
+    x = "Index",
+    y = "Moment magnitude",
+    title = "Maximum daily amplitude time-series",
+    color = "Legend"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14, face = "bold"),
+    plot.title = element_text(size = 18, face = "bold")
+  )
+
+library(ggplot2)
+
+df_eq_plot <- df_eq
+df_eq_plot$time_days <- df_eq_plot$time_diff_float_mean / (24 * 60 * 60)  # Convert seconds to days
+ggplot(df_eq_plot, aes(y = time_days)) +
+  geom_histogram(binwidth = 1, color = 'black', fill = 'red', alpha = 0.7) +
+  coord_flip() +  # Flip coordinates to make it horizontal
+  labs(
+    title = '50 years of California earthquakes',
+    y = 'Time interval (days)',
+    x = 'Frequency of earthquake occurrence'
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold"),
+    axis.title.y = element_text(size = 22),
+    axis.title.x = element_text(size = 22),
+    axis.text.y = element_text(size = 18),
+    axis.text.x = element_text(size = 18)
+  ) +
+  scale_x_log10()  # Log scale on the x-axis
+
+
+df_eq_model <- df_eq[, !(names(df_eq) %in% c("large_eq_label"))]
+
+]train_size <- round(nrow(df_eq_model) * 0.9)
+test_size <- nrow(df_eq_model) - train_size
+
+train <- df_eq_model[1:train_size, ]
+test <- df_eq_model[(train_size + 1):nrow(df_eq_model), ]
+
+print(paste("Train shape:", nrow(train), "rows,", ncol(train), "columns"))
+print(paste("Test shape:", nrow(test), "rows,", ncol(test), "columns"))
+
+f_columns <- c('event_count', 'mag_mean', 'mag_sum', 'mag_scatter',
+               'longitude_mean', 'longitude_std', 'latitude_mean', 'latitude_std',
+               'depth_mean', 'depth_std', 'time_diff_float_mean',
+               'time_diff_float_std')
+
+train_scaled <- train
+train_scaled[, f_columns] <- scale(train_scaled[, f_columns])
+
+train_scaled$mag_max <- scale(train_scaled$mag_max)
+
+print(head(train_scaled))
+```
